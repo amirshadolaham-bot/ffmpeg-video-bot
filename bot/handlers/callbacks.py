@@ -1816,7 +1816,7 @@ async def process_video(
                 error = result
         
         if not success:
-            await status_msg.edit_text(f"❌ Error: {error[:500]}")
+            await status_msg.edit_text(f"❌ Error: {error[-500:]}")
             return
         
         # Check file size
