@@ -482,10 +482,12 @@ async def upload_file(client: Client, chat_id: int, file_path: str | list, statu
                 # Generate thumbnail
                 thumb_dir = os.path.dirname(file_path)
                 thumb_path = os.path.join(thumb_dir, f"{os.path.splitext(file_name)[0]}_thumb.jpg")
-                await ffmpeg.extract_thumbnail(thumb_path)
+                from bot.ffmpeg import extract_thumbnail
+                await extract_thumbnail(file_path, thumb_path)
                 if not os.path.exists(thumb_path):
                     thumb_path = None
             except Exception as e:
+                thumb_path = None
                 LOGGER.warning(f"Could not get video metadata: {e}")
             
             await client.send_video(
