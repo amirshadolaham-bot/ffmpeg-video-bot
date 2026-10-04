@@ -10,6 +10,13 @@ from bot.ffmpeg.core import FFmpeg, run_ffmpeg_command
 
 LOGGER = logging.getLogger(__name__)
 
+# ---- Text watermark look (edit these 3 lines to change the style) ----
+WM_FONT_DIVISOR = 30          # font size = video height / this number (smaller number = bigger text)
+WM_TEXT_COLOR = "black"       # text color, e.g. white, yellow, black
+WM_BOX_COLOR = "white@1.0"    # box behind text: color@opacity, e.g. black@0.5, white@1.0
+WM_BOX_PADDING = 3            # space between text and box edge in pixels (bigger = thicker box)
+# ----------------------------------------------------------------------
+
 
 async def add_image_watermark(
     input_file: str,
@@ -63,9 +70,9 @@ async def add_text_watermark(
     text: str,
     output: str,
     position: str = 'bottom_right',
-    font_size: int = 24,
-    font_color: str = 'white',
-    opacity: float = 0.7,
+    font_size: int = 0,
+    font_color: str = '',
+    opacity: float = 1.0,
     progress_callback: Callable = None,
     duration: float = None
 ) -> Tuple[bool, str]:
@@ -73,34 +80,49 @@ async def add_text_watermark(
     
     # Position mapping
     positions = {
-        'top_left': 'x=10:y=10',
-        'top_center': 'x=(w-text_w)/2:y=10',
-        'top_right': 'x=w-text_w-10:y=10',
-        'middle_left': 'x=10:y=(h-text_h)/2',
+        'top_left': 'x=20:y=20',
+        'top_center': 'x=(w-text_w)/2:y=20',
+        'top_right': 'x=w-text_w-20:y=20',
+        'middle_left': 'x=20:y=(h-text_h)/2',
         'center': 'x=(w-text_w)/2:y=(h-text_h)/2',
-        'middle_right': 'x=w-text_w-10:y=(h-text_h)/2',
-        'bottom_left': 'x=10:y=h-text_h-10',
-        'bottom_center': 'x=(w-text_w)/2:y=h-text_h-10',
-        'bottom_right': 'x=w-text_w-10:y=h-text_h-10',
+        'middle_right': 'x=w-text_w-20:y=(h-text_h)/2',
+        'bottom_left': 'x=20:y=h-text_h-20',
+        'bottom_center': 'x=(w-text_w)/2:y=h-text_h-20',
+        'bottom_right': 'x=w-text_w-20:y=h-text_h-20',
     }
     
-    pos = positions.get(position, 'x=w-text_w-10:y=h-text_h-10')
-    
-    # Escape special characters in text
-    escaped_text = text.replace("'", "\\'").replace(":", "\\:")
-    
-    drawtext = (
-        f"drawtext=text='{escaped_text}':"
-        f"{pos}:"
-        f"fontsize={font_size}:"
-        f"fontcolor={font_color}@{opacity}:"
-        f"shadowcolor=black@0.5:shadowx=2:shadowy=2"
-    )
+    def _escape(t: str) -> str:
+        return t.replace("\\", "\\\\").replace("'", "\u2019").replace(":", "\\:").replace("%", "\\%")
+
+    fs = str(font_size) if font_size else f"h/{WM_FONT_DIVISOR}"
+    color = font_color or WM_TEXT_COLOR
+
+    def _one(t: str, pos_str: str) -> str:
+        return (
+            f"drawtext=text='{_escape(t)}':"
+            f"{pos_str}:"
+            f"fontsize={fs}:"
+            f"fontcolor={color}@{opacity}:"
+            f"box=1:boxcolor={WM_BOX_COLOR}:boxborderw={WM_BOX_PADDING}"
+        )
+
+    # If the text contains "|" -> two watermarks in one pass:
+    # first part bottom-left, second part top-right
+    parts = [x.strip() for x in text.split('|') if x.strip()]
+    if len(parts) >= 2:
+        drawtext = ",".join([
+            _one(parts[0], positions['bottom_left']),
+            _one(parts[1], positions['top_right']),
+        ])
+    else:
+        pos = positions.get(position, 'x=w-text_w-10:y=h-text_h-10')
+        drawtext = _one(parts[0] if parts else text, pos)
     
     cmd = [
-        'ffmpeg', '-y', '-hide_banner',
+        'ffmpeg', '-y', '-hide_banner', '-nostats',
         '-i', input_file,
         '-vf', drawtext,
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
         '-c:a', 'copy',
         output
     ]
