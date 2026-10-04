@@ -424,6 +424,66 @@ async def download_file(message: Message, status_msg: Message, user_id: int = No
     return file_path
 
 
+async def _original_thumb(client: Client, chat_id: int, user_id: int, base_dir: str, base_name: str):
+    """Keep the cover/thumbnail that the user's original video already had
+    (e.g. one added by another bot). Returns a file path or None."""
+    try:
+        info = user_data.get(user_id) if user_id else None
+        msg_id = info.get('message_id') if info else None
+        if not msg_id:
+            return None
+        msg = await client.get_messages(chat_id, msg_id)
+        media = (msg.video or msg.document) if msg else None
+        thumbs = getattr(media, 'thumbs', None) if media else None
+        if not thumbs:
+            return None
+        out = os.path.join(base_dir, f"{base_name}_orig_thumb.jpg")
+        got = await client.download_media(thumbs[0].file_id, file_name=out)
+        got = str(got) if got else None
+        return got if got and os.path.exists(got) else None
+    except Exception as e:
+        LOGGER.warning(f"Could not reuse original thumbnail: {e}")
+        return None
+
+
+async def _prepare_custom_thumb(client: Client, user_id: int, base_dir: str, base_name: str):
+    """Download the user's saved custom thumbnail (set with /thumb) and shrink it
+    to Telegram's limits (JPEG, max 320px). Returns the file path or None."""
+    try:
+        from bot.utils.db_handler import get_db
+        db = get_db()
+        if not db or not user_id:
+            return None
+        file_id = await db.get_thumbnail(user_id)
+        if not file_id:
+            return None
+
+        raw = os.path.join(base_dir, f"{base_name}_custom_raw.jpg")
+        out = os.path.join(base_dir, f"{base_name}_custom_thumb.jpg")
+        downloaded = await client.download_media(file_id, file_name=raw)
+        if not downloaded:
+            return None
+
+        proc = await asyncio.create_subprocess_exec(
+            'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-nostats',
+            '-i', str(downloaded),
+            '-vf', "scale='if(gt(iw,ih),320,-2)':'if(gt(iw,ih),-2,320)'",
+            '-frames:v', '1', '-q:v', '5',
+            out,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        try:
+            os.remove(str(downloaded))
+        except Exception:
+            pass
+        return out if os.path.exists(out) else None
+    except Exception as e:
+        LOGGER.warning(f"Custom thumbnail failed, using auto thumbnail: {e}")
+        return None
+
+
 async def upload_file(client: Client, chat_id: int, file_path: str | list, status_msg: Message, caption: str = None, user_id: int = None):
     """Upload file with progress"""
     
@@ -479,13 +539,19 @@ async def upload_file(client: Client, chat_id: int, file_path: str | list, statu
                     width = video_streams[0].get('width', 0)
                     height = video_streams[0].get('height', 0)
                 
-                # Generate thumbnail
+                # Thumbnail order: 1) the original video's own cover (kept as is),
+                # 2) the user's saved /thumb, 3) a frame taken from the video
                 thumb_dir = os.path.dirname(file_path)
-                thumb_path = os.path.join(thumb_dir, f"{os.path.splitext(file_name)[0]}_thumb.jpg")
-                from bot.ffmpeg import extract_thumbnail
-                await extract_thumbnail(file_path, thumb_path)
-                if not os.path.exists(thumb_path):
-                    thumb_path = None
+                base_name = os.path.splitext(file_name)[0]
+                thumb_path = await _original_thumb(client, chat_id, user_id, thumb_dir, base_name)
+                if not thumb_path:
+                    thumb_path = await _prepare_custom_thumb(client, user_id, thumb_dir, base_name)
+                if not thumb_path:
+                    thumb_path = os.path.join(thumb_dir, f"{base_name}_thumb.jpg")
+                    from bot.ffmpeg import extract_thumbnail
+                    await extract_thumbnail(file_path, thumb_path)
+                    if not os.path.exists(thumb_path):
+                        thumb_path = None
             except Exception as e:
                 thumb_path = None
                 LOGGER.warning(f"Could not get video metadata: {e}")
