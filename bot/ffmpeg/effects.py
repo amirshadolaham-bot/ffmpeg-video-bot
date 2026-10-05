@@ -99,7 +99,22 @@ async def add_text_watermark(
         'bottom_right': 'x=w-text_w-12:y=h-text_h-12',
     }
     
+    def _rtl(t: str) -> str:
+        """If the text has Persian/Arabic letters, make the whole line read right-to-left,
+        so the first word is on the right and an English ID typed after it ends up on the left."""
+        if not any('\u0600' <= ch <= '\u06ff' or '\u0750' <= ch <= '\u077f' or '\ufb50' <= ch <= '\ufdff' or '\ufe70' <= ch <= '\ufeff' for ch in t):
+            return t
+        import re
+        # Keep every English token (like @my_id or t.me/chan) in its own left-to-right box,
+        # so the "@" stays at the start of the ID.
+        latin = re.compile(r'[@#A-Za-z0-9][@#A-Za-z0-9_.\-/]*')
+        def _line(line: str) -> str:
+            line = latin.sub(lambda m: "\u202a" + m.group(0) + "\u202c", line.strip())
+            return "\u202b" + line + "\u202c"
+        return "\n".join(_line(line) for line in t.split("\n"))
+
     def _escape(t: str) -> str:
+        t = _rtl(t)
         return t.replace("\\", "\\\\").replace("'", "\u2019").replace(":", "\\:").replace("%", "\\%")
 
     color = font_color or WM_TEXT_COLOR
