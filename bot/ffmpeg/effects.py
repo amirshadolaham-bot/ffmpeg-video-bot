@@ -23,6 +23,18 @@ WM_POS_TEXT = "top_left"      # where text 1 goes when you send two texts with |
 WM_ID_COLOR = "white"
 WM_ID_DIVISOR = 45
 WM_POS_ID = "bottom_right"    # where text 2 goes when you send two texts with |
+
+# "Cover mode" (used only when you send two texts with |):
+#   text 1 -> full-width white bar at the top of the video, text centered inside it
+#   text 2 -> bottom-left, on a blurred + slightly darkened patch
+WM_COVER_MODE = True
+WM_TOPBAR_Y = 0.0             # top of the white bar, as a fraction of video height (0 = very top)
+WM_TOPBAR_H = 0.085           # height of the white bar, as a fraction of video height
+WM_PATCH_W = 0.26             # width of the bottom-left blurred patch, as a fraction of video width
+WM_PATCH_H = 0.085            # height of the blurred patch, as a fraction of video height
+WM_PATCH_MARGIN = 0.012       # distance of the patch from the bottom edge (fraction of height)
+WM_PATCH_BLUR = 10            # blur strength (bigger = more blurred)
+WM_PATCH_DARK = 0.30          # 0 = no darkening, 0.5 = darker patch (helps white text stay readable)
 # ----------------------------------------------------------------------
 
 
@@ -151,6 +163,39 @@ async def add_text_watermark(
 
     # Text with "|" -> two watermarks in one pass: text 1 (boxed) and text 2 (ID, plain)
     parts = [x.strip() for x in text.split('|') if x.strip()]
+
+    if len(parts) >= 2 and WM_COVER_MODE:
+        n1 = max([len(l) for l in parts[0].split("\n")] + [1])
+        n2 = max([len(l) for l in parts[1].split("\n")] + [1])
+        bold = f"fontfile={bold_font}:" if use_bold else ""
+        graph = (
+            "[0:v]split=2[a][b];"
+            f"[b]crop=w=iw*{WM_PATCH_W}:h=ih*{WM_PATCH_H}:x=0:y=ih-ih*{WM_PATCH_H}-ih*{WM_PATCH_MARGIN},"
+            f"boxblur=luma_radius={WM_PATCH_BLUR}:luma_power=3:chroma_radius={WM_PATCH_BLUR}:chroma_power=3,"
+            f"drawbox=x=0:y=0:w=iw:h=ih:color=black@{WM_PATCH_DARK}:t=fill[patch];"
+            f"[a][patch]overlay=x=0:y=H-h-H*{WM_PATCH_MARGIN},"
+            f"drawbox=x=0:y=ih*{WM_TOPBAR_Y}:w=iw:h=ih*{WM_TOPBAR_H}:color=white@1.0:t=fill,"
+            f"drawtext=text='{_escape(parts[0])}':{bold}"
+            f"x=(w-text_w)/2:y=h*{WM_TOPBAR_Y}+(h*{WM_TOPBAR_H}-text_h)/2:"
+            f"fontsize='min(h*{WM_TOPBAR_H}*0.5,w*0.92/({0.65 if use_bold else 0.6}*{n1}))':"
+            f"fontcolor={color}@1.0,"
+            f"drawtext=text='{_escape(parts[1])}':"
+            f"x=(w*{WM_PATCH_W}-text_w)/2:y=h-h*{WM_PATCH_MARGIN}-h*{WM_PATCH_H}/2-text_h/2:"
+            f"fontsize='min(h*{WM_PATCH_H}*0.4,w*{WM_PATCH_W}*0.9/(0.6*{n2}))':"
+            f"fontcolor={WM_ID_COLOR}@1.0:borderw=1:bordercolor=black@0.7[v]"
+        )
+        cmd = [
+            'ffmpeg', '-y', '-hide_banner', '-nostats',
+            '-i', input_file,
+            '-filter_complex', graph,
+            '-map', '[v]', '-map', '0:a?',
+            '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+            '-c:a', 'copy',
+            output
+        ]
+        success, result = await run_ffmpeg_command(cmd, progress_callback, duration)
+        return success, result if not success else output
+
     if len(parts) >= 2:
         drawtext = ",".join([
             _boxed(parts[0], positions[WM_POS_TEXT]),
