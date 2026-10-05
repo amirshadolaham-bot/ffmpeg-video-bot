@@ -11,10 +11,10 @@ from bot.ffmpeg.core import FFmpeg, run_ffmpeg_command
 LOGGER = logging.getLogger(__name__)
 
 # ---- Text watermark look (edit these 3 lines to change the style) ----
-WM_FONT_DIVISOR = 30          # font size = video height / this number (smaller number = bigger text)
+WM_FONT_DIVISOR = 25          # max font size = shorter side of the video / this number (smaller number = bigger text)
 WM_TEXT_COLOR = "black"       # text color, e.g. white, yellow, black
 WM_BOX_COLOR = "white@1.0"    # box behind text: color@opacity, e.g. black@0.5, white@1.0
-WM_BOX_PADDING = 3            # space between text and box edge in pixels (bigger = thicker box)
+WM_BOX_PADDING = 10           # space between text and box edge in pixels (bigger = taller/thicker box)
 # ----------------------------------------------------------------------
 
 
@@ -80,28 +80,35 @@ async def add_text_watermark(
     
     # Position mapping
     positions = {
-        'top_left': 'x=20:y=20',
-        'top_center': 'x=(w-text_w)/2:y=20',
-        'top_right': 'x=w-text_w-20:y=20',
-        'middle_left': 'x=20:y=(h-text_h)/2',
+        'top_left': 'x=12:y=12',
+        'top_center': 'x=(w-text_w)/2:y=12',
+        'top_right': 'x=w-text_w-12:y=12',
+        'middle_left': 'x=12:y=(h-text_h)/2',
         'center': 'x=(w-text_w)/2:y=(h-text_h)/2',
-        'middle_right': 'x=w-text_w-20:y=(h-text_h)/2',
-        'bottom_left': 'x=20:y=h-text_h-20',
-        'bottom_center': 'x=(w-text_w)/2:y=h-text_h-20',
-        'bottom_right': 'x=w-text_w-20:y=h-text_h-20',
+        'middle_right': 'x=w-text_w-12:y=(h-text_h)/2',
+        'bottom_left': 'x=12:y=h-text_h-12',
+        'bottom_center': 'x=(w-text_w)/2:y=h-text_h-12',
+        'bottom_right': 'x=w-text_w-12:y=h-text_h-12',
     }
     
     def _escape(t: str) -> str:
         return t.replace("\\", "\\\\").replace("'", "\u2019").replace(":", "\\:").replace("%", "\\%")
 
-    fs = str(font_size) if font_size else f"h/{WM_FONT_DIVISOR}"
     color = font_color or WM_TEXT_COLOR
+
+    def _fontsize(t: str) -> str:
+        if font_size:
+            return str(font_size)
+        # Biggest size that still fits the video width (longest line decides),
+        # but never bigger than shorter side / WM_FONT_DIVISOR
+        n = max([len(line) for line in t.split("\n")] + [1])
+        return f"'min(min(w,h)/{WM_FONT_DIVISOR},w*0.9/(0.6*{n}))'"
 
     def _one(t: str, pos_str: str) -> str:
         return (
             f"drawtext=text='{_escape(t)}':"
             f"{pos_str}:"
-            f"fontsize={fs}:"
+            f"fontsize={_fontsize(t)}:"
             f"fontcolor={color}@{opacity}:"
             f"box=1:boxcolor={WM_BOX_COLOR}:boxborderw={WM_BOX_PADDING}"
         )
