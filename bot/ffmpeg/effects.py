@@ -10,11 +10,19 @@ from bot.ffmpeg.core import FFmpeg, run_ffmpeg_command
 
 LOGGER = logging.getLogger(__name__)
 
-# ---- Text watermark look (edit these 3 lines to change the style) ----
-WM_FONT_DIVISOR = 25          # max font size = shorter side of the video / this number (smaller number = bigger text)
-WM_TEXT_COLOR = "black"       # text color, e.g. white, yellow, black
-WM_BOX_COLOR = "white@1.0"    # box behind text: color@opacity, e.g. black@0.5, white@1.0
-WM_BOX_PADDING = 10           # space between text and box edge in pixels (bigger = taller/thicker box)
+# ---- Text watermark look (edit these lines to change the style) ----
+# Text 1: the main text. Small, black on a white box, slightly bold.
+WM_FONT_DIVISOR = 45          # font size = shorter side of video / this number (bigger number = smaller text)
+WM_MIN_FONT = 14              # never smaller than this many pixels (unless the text would not fit the width)
+WM_TEXT_COLOR = "black"       # text color
+WM_BOX_COLOR = "white@1.0"    # box behind text: color@opacity
+WM_BOX_PADDING = 6            # space between text and box edge in pixels
+WM_BOLD = True                # True = bold font for text 1
+WM_POS_TEXT = "top_left"      # where text 1 goes when you send two texts with |
+# Text 2: the ID. Plain white text, no box, not bold.
+WM_ID_COLOR = "white"
+WM_ID_DIVISOR = 45
+WM_POS_ID = "bottom_right"    # where text 2 goes when you send two texts with |
 # ----------------------------------------------------------------------
 
 
@@ -96,34 +104,46 @@ async def add_text_watermark(
 
     color = font_color or WM_TEXT_COLOR
 
-    def _fontsize(t: str) -> str:
+    bold_font = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    use_bold = WM_BOLD and os.path.exists(bold_font)
+
+    def _fontsize(t: str, divisor: int, char_w: float) -> str:
         if font_size:
             return str(font_size)
-        # Biggest size that still fits the video width (longest line decides),
-        # but never bigger than shorter side / WM_FONT_DIVISOR
+        # Wanted size, but never wider than the video (longest line decides)
         n = max([len(line) for line in t.split("\n")] + [1])
-        return f"'min(min(w,h)/{WM_FONT_DIVISOR},w*0.9/(0.6*{n}))'"
+        return f"'min(max({WM_MIN_FONT},min(w,h)/{divisor}),w*0.9/({char_w}*{n}))'"
 
-    def _one(t: str, pos_str: str) -> str:
+    def _boxed(t: str, pos_str: str) -> str:
+        font = f"fontfile={bold_font}:" if use_bold else ""
         return (
             f"drawtext=text='{_escape(t)}':"
+            f"{font}"
             f"{pos_str}:"
-            f"fontsize={_fontsize(t)}:"
+            f"fontsize={_fontsize(t, WM_FONT_DIVISOR, 0.65 if use_bold else 0.6)}:"
             f"fontcolor={color}@{opacity}:"
             f"box=1:boxcolor={WM_BOX_COLOR}:boxborderw={WM_BOX_PADDING}"
         )
 
-    # If the text contains "|" -> two watermarks in one pass:
-    # first part bottom-left, second part top-right
+    def _plain(t: str, pos_str: str) -> str:
+        return (
+            f"drawtext=text='{_escape(t)}':"
+            f"{pos_str}:"
+            f"fontsize={_fontsize(t, WM_ID_DIVISOR, 0.6)}:"
+            f"fontcolor={WM_ID_COLOR}@{opacity}:"
+            f"borderw=1:bordercolor=black@0.7"
+        )
+
+    # Text with "|" -> two watermarks in one pass: text 1 (boxed) and text 2 (ID, plain)
     parts = [x.strip() for x in text.split('|') if x.strip()]
     if len(parts) >= 2:
         drawtext = ",".join([
-            _one(parts[0], positions['bottom_left']),
-            _one(parts[1], positions['top_right']),
+            _boxed(parts[0], positions[WM_POS_TEXT]),
+            _plain(parts[1], positions[WM_POS_ID]),
         ])
     else:
-        pos = positions.get(position, 'x=w-text_w-10:y=h-text_h-10')
-        drawtext = _one(parts[0] if parts else text, pos)
+        pos = positions.get(position, positions['bottom_right'])
+        drawtext = _boxed(parts[0] if parts else text, pos)
     
     cmd = [
         'ffmpeg', '-y', '-hide_banner', '-nostats',
