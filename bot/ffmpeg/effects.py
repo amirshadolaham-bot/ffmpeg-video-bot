@@ -27,7 +27,7 @@ WM_CHAR_EM = 0.49             # (technical) average width of one character in fo
 WM_POS_TEXT = "top_left"      # where text 1 goes when you send two texts with |
 # Text 2: the ID. Plain white text, no box, not bold.
 WM_ID_COLOR = "white"
-WM_ID_DIVISOR = 45
+WM_ID_DIVISOR = 43
 WM_POS_ID = "bottom_right"    # where text 2 goes when you send two texts with |
 
 # "Cover mode" (used only when you send two texts with |):
@@ -204,7 +204,7 @@ async def add_text_watermark(
             f"{_pos(key, 12)}:"
             f"fontsize={_fontsize(t, WM_ID_DIVISOR, 0.6)}:"
             f"fontcolor={WM_ID_COLOR}@{opacity}:"
-            f"borderw=1:bordercolor=black@0.7"
+            f"borderw=2:bordercolor=black@0.95:shadowcolor=black@0.6:shadowx=1:shadowy=1"
         )
 
     # Text with "|" -> two watermarks in one pass: text 1 (boxed) and text 2 (ID, plain)
