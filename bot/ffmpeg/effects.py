@@ -19,7 +19,7 @@ WM_STROKE_RATIO = 0.167       # outline thickness as a fraction of the font size
 WM_MIN_FONT = 10              # never smaller than this many pixels
 WM_TEXT_COLOR = "black"       # text color
 WM_STROKE_COLOR = "white"     # outline color
-WM_BOX_COLOR = "white@0.75"   # box behind text: color@opacity
+WM_BOX_COLOR = "white@1.0"   # box behind text: color@opacity
 WM_MARGIN = 0                 # distance of the bar from the video edge, in pixels (0 = touching the corner)
 WM_BOLD = True                # True = use the bold font
 WM_LINE_EM = 1.12             # (technical) height of one text line in font sizes, for Vazirmatn
@@ -208,8 +208,8 @@ async def add_text_watermark(
         )
 
     # Text with "|" -> two watermarks in one pass: text 1 (boxed) and text 2 (ID, plain)
-    # One single line only: anything after "|" is joined to the same line (no cover mode, no second text)
-    parts = [" ".join(x.strip() for x in text.split('|') if x.strip())]
+    # Text with "|" -> two boxed tags: text 1 top-left, text 2 bottom-left (or bottom-right via the Position menu)
+    parts = [x.strip() for x in text.split('|') if x.strip()]
 
     if len(parts) >= 2 and WM_COVER_MODE:
         n1 = max([len(l) for l in parts[0].split("\n")] + [1])
@@ -244,13 +244,14 @@ async def add_text_watermark(
         return success, result if not success else output
 
     if len(parts) >= 2:
+        pos2 = position if position in ('bottom_left', 'bottom_right') else 'bottom_left'
         drawtext = ",".join([
-            _boxed(parts[0], WM_POS_TEXT),
-            _plain(parts[1], WM_POS_ID),
+            _boxed(parts[0], 'top_left'),
+            _boxed(parts[1], pos2),
         ])
     else:
-        drawtext = _boxed(parts[0] if parts else text, position)
-    
+        drawtext = _boxed(parts[0] if parts else text, 'top_left')
+
     cmd = [
         'ffmpeg', '-y', '-hide_banner', '-nostats',
         '-i', input_file,

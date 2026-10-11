@@ -101,7 +101,7 @@ class Database:
             # Watermark
             "watermark_enabled": False,
             "watermark_text": None,
-            "watermark_position": "bottom_right",
+            "watermark_position": "bottom_left",
             
             # Metadata
             "metadata_title": None,
