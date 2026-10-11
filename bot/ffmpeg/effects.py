@@ -247,7 +247,7 @@ async def add_text_watermark(
         pos2 = position if position in ('bottom_left', 'bottom_right') else 'bottom_left'
         drawtext = ",".join([
             _boxed(parts[0], 'top_left'),
-            _boxed(parts[1], pos2),
+            _plain(parts[1], pos2),
         ])
     else:
         drawtext = _boxed(parts[0] if parts else text, 'top_left')
