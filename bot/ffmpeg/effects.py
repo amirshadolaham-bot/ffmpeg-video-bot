@@ -13,8 +13,8 @@ LOGGER = logging.getLogger(__name__)
 # ---- Text watermark look (edit these lines to change the style) ----
 # Text 1: the main text. Same look as the Premiere design:
 #   Vazirmatn Bold, black text with a thin white outline, on a white box (75% opaque), stuck to the corner.
-WM_FONT_RATIO = 0.0302        # font size as a fraction of the video's SHORTER side (bigger = bigger text)
-WM_BAR_RATIO = 0.0404           # height of the white bar as a fraction of the shorter side
+WM_FONT_RATIO = 0.0272        # font size as a fraction of the video's SHORTER side (bigger = bigger text)
+WM_BAR_RATIO = 0.0364           # height of the white bar as a fraction of the shorter side
 WM_STROKE_RATIO = 0.167       # outline thickness as a fraction of the font size (0 = no outline)
 WM_MIN_FONT = 10              # never smaller than this many pixels
 WM_TEXT_COLOR = "black"       # text color
