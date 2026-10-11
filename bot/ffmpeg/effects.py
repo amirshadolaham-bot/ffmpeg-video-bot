@@ -33,7 +33,7 @@ WM_POS_ID = "bottom_right"    # where text 2 goes when you send two texts with |
 # "Cover mode" (used only when you send two texts with |):
 #   text 1 -> full-width white bar at the top of the video, text centered inside it
 #   text 2 -> bottom-left, on a blurred + slightly darkened patch
-WM_COVER_MODE = True
+WM_COVER_MODE = False
 WM_TOPBAR_Y = 0.0             # top of the white bar, as a fraction of video height (0 = very top)
 WM_TOPBAR_H = 0.085           # height of the white bar, as a fraction of video height
 WM_PATCH_W = 0.26             # width of the bottom-left blurred patch, as a fraction of video width
@@ -208,7 +208,8 @@ async def add_text_watermark(
         )
 
     # Text with "|" -> two watermarks in one pass: text 1 (boxed) and text 2 (ID, plain)
-    parts = [x.strip() for x in text.split('|') if x.strip()]
+    # One single line only: anything after "|" is joined to the same line (no cover mode, no second text)
+    parts = [" ".join(x.strip() for x in text.split('|') if x.strip())]
 
     if len(parts) >= 2 and WM_COVER_MODE:
         n1 = max([len(l) for l in parts[0].split("\n")] + [1])
