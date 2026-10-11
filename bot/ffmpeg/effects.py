@@ -11,13 +11,19 @@ from bot.ffmpeg.core import FFmpeg, run_ffmpeg_command
 LOGGER = logging.getLogger(__name__)
 
 # ---- Text watermark look (edit these lines to change the style) ----
-# Text 1: the main text. Small, black on a white box, slightly bold.
-WM_FONT_DIVISOR = 45          # font size = shorter side of video / this number (bigger number = smaller text)
-WM_MIN_FONT = 14              # never smaller than this many pixels (unless the text would not fit the width)
+# Text 1: the main text. Same look as the Premiere design:
+#   Vazirmatn Bold, black text with a thin white outline, on a white box (75% opaque), stuck to the corner.
+WM_FONT_RATIO = 0.0374        # font size as a fraction of the video's SHORTER side (bigger = bigger text)
+WM_BAR_RATIO = 0.05           # height of the white bar as a fraction of the shorter side
+WM_STROKE_RATIO = 0.167       # outline thickness as a fraction of the font size (0 = no outline)
+WM_MIN_FONT = 10              # never smaller than this many pixels
 WM_TEXT_COLOR = "black"       # text color
-WM_BOX_COLOR = "white@1.0"    # box behind text: color@opacity
-WM_BOX_PADDING = 6            # space between text and box edge in pixels
-WM_BOLD = True                # True = bold font for text 1
+WM_STROKE_COLOR = "white"     # outline color
+WM_BOX_COLOR = "white@0.75"   # box behind text: color@opacity
+WM_MARGIN = 0                 # distance of the bar from the video edge, in pixels (0 = touching the corner)
+WM_BOLD = True                # True = use the bold font
+WM_LINE_EM = 1.12             # (technical) height of one text line in font sizes, for Vazirmatn
+WM_CHAR_EM = 0.49             # (technical) average width of one character in font sizes, for Vazirmatn
 WM_POS_TEXT = "top_left"      # where text 1 goes when you send two texts with |
 # Text 2: the ID. Plain white text, no box, not bold.
 WM_ID_COLOR = "white"
@@ -36,6 +42,25 @@ WM_PATCH_MARGIN = 0.012       # distance of the patch from the bottom edge (frac
 WM_PATCH_BLUR = 10            # blur strength (bigger = more blurred)
 WM_PATCH_DARK = 0.30          # 0 = no darkening, 0.5 = darker patch (helps white text stay readable)
 # ----------------------------------------------------------------------
+
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+WM_FONT_FILE = os.path.join(_BASE_DIR, "fonts", "Vazirmatn-Bold.ttf")
+WM_FONT_FALLBACK = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+
+async def _probe_size(path: str):
+    """Return (width, height) of the first video stream, or None."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            'ffprobe', '-v', 'error', '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height', '-of', 'csv=p=0:s=x', path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+        w, h = out.decode().strip().split('\n')[0].split('x')[:2]
+        return int(w), int(h)
+    except Exception:
+        return None
 
 
 async def add_image_watermark(
@@ -98,19 +123,21 @@ async def add_text_watermark(
 ) -> Tuple[bool, str]:
     """Add text watermark to video"""
     
-    # Position mapping
-    positions = {
-        'top_left': 'x=12:y=12',
-        'top_center': 'x=(w-text_w)/2:y=12',
-        'top_right': 'x=w-text_w-12:y=12',
-        'middle_left': 'x=12:y=(h-text_h)/2',
-        'center': 'x=(w-text_w)/2:y=(h-text_h)/2',
-        'middle_right': 'x=w-text_w-12:y=(h-text_h)/2',
-        'bottom_left': 'x=12:y=h-text_h-12',
-        'bottom_center': 'x=(w-text_w)/2:y=h-text_h-12',
-        'bottom_right': 'x=w-text_w-12:y=h-text_h-12',
-    }
-    
+    # Position of a box/text inside the video, `m` pixels away from the edges
+    def _pos(key: str, m: int) -> str:
+        table = {
+            'top_left': f'x={m}:y={m}',
+            'top_center': f'x=(w-text_w)/2:y={m}',
+            'top_right': f'x=w-text_w-{m}:y={m}',
+            'middle_left': f'x={m}:y=(h-text_h)/2',
+            'center': 'x=(w-text_w)/2:y=(h-text_h)/2',
+            'middle_right': f'x=w-text_w-{m}:y=(h-text_h)/2',
+            'bottom_left': f'x={m}:y=h-text_h-{m}',
+            'bottom_center': f'x=(w-text_w)/2:y=h-text_h-{m}',
+            'bottom_right': f'x=w-text_w-{m}:y=h-text_h-{m}',
+        }
+        return table.get(key, table['bottom_right'])
+
     def _rtl(t: str) -> str:
         """If the text has Persian/Arabic letters, make the whole line read right-to-left,
         so the first word is on the right and an English ID typed after it ends up on the left."""
@@ -131,8 +158,9 @@ async def add_text_watermark(
 
     color = font_color or WM_TEXT_COLOR
 
-    bold_font = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-    use_bold = WM_BOLD and os.path.exists(bold_font)
+    bold_font = WM_FONT_FILE if os.path.exists(WM_FONT_FILE) else (WM_FONT_FALLBACK if os.path.exists(WM_FONT_FALLBACK) else None)
+    use_bold = WM_BOLD and bold_font is not None
+    dims = await _probe_size(input_file)   # (width, height) or None
 
     def _fontsize(t: str, divisor: int, char_w: float) -> str:
         if font_size:
@@ -141,21 +169,39 @@ async def add_text_watermark(
         n = max([len(line) for line in t.split("\n")] + [1])
         return f"'min(max({WM_MIN_FONT},min(w,h)/{divisor}),w*0.9/({char_w}*{n}))'"
 
-    def _boxed(t: str, pos_str: str) -> str:
+    def _boxed(t: str, key: str) -> str:
+        """Text 1: Vazirmatn Bold, black, thin white outline, white 75% box, sizes relative to the video."""
+        n = max([len(line) for line in t.split("\n")] + [1])
         font = f"fontfile={bold_font}:" if use_bold else ""
+        if dims:
+            vw, vh = dims
+            short = min(vw, vh)
+            fs = float(font_size) if font_size else max(WM_MIN_FONT, short * WM_FONT_RATIO)
+            if not font_size:
+                # shrink long texts so the bar never goes outside the video
+                fs = min(fs, (vw - 2 * WM_MARGIN) * 0.96 / (WM_CHAR_EM * n + 0.6))
+            fs = max(8, int(round(fs)))
+            pad = max(0, int(round((short * WM_BAR_RATIO - fs * WM_LINE_EM) / 2)))
+            stroke = int(round(fs * WM_STROKE_RATIO))
+            size_part = f"fontsize={fs}:"
+        else:
+            pad, stroke = 4, 2
+            size_part = f"fontsize='{font_size or 'min(w,h)*' + str(WM_FONT_RATIO)}':"
+        outline = f"borderw={stroke}:bordercolor={WM_STROKE_COLOR}:" if stroke > 0 else ""
         return (
             f"drawtext=text='{_escape(t)}':"
             f"{font}"
-            f"{pos_str}:"
-            f"fontsize={_fontsize(t, WM_FONT_DIVISOR, 0.65 if use_bold else 0.6)}:"
+            f"{_pos(key, WM_MARGIN + pad)}:"
+            f"{size_part}"
             f"fontcolor={color}@{opacity}:"
-            f"box=1:boxcolor={WM_BOX_COLOR}:boxborderw={WM_BOX_PADDING}"
+            f"{outline}"
+            f"box=1:boxcolor={WM_BOX_COLOR}:boxborderw={pad}"
         )
 
-    def _plain(t: str, pos_str: str) -> str:
+    def _plain(t: str, key: str) -> str:
         return (
             f"drawtext=text='{_escape(t)}':"
-            f"{pos_str}:"
+            f"{_pos(key, 12)}:"
             f"fontsize={_fontsize(t, WM_ID_DIVISOR, 0.6)}:"
             f"fontcolor={WM_ID_COLOR}@{opacity}:"
             f"borderw=1:bordercolor=black@0.7"
@@ -198,12 +244,11 @@ async def add_text_watermark(
 
     if len(parts) >= 2:
         drawtext = ",".join([
-            _boxed(parts[0], positions[WM_POS_TEXT]),
-            _plain(parts[1], positions[WM_POS_ID]),
+            _boxed(parts[0], WM_POS_TEXT),
+            _plain(parts[1], WM_POS_ID),
         ])
     else:
-        pos = positions.get(position, positions['bottom_right'])
-        drawtext = _boxed(parts[0] if parts else text, pos)
+        drawtext = _boxed(parts[0] if parts else text, position)
     
     cmd = [
         'ffmpeg', '-y', '-hide_banner', '-nostats',
