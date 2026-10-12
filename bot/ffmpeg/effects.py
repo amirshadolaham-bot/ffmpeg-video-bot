@@ -257,6 +257,7 @@ async def add_text_watermark(
         '-i', input_file,
         '-vf', drawtext,
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+        '-threads', '2', '-x264-params', 'rc-lookahead=10',
         '-c:a', 'copy',
         output
     ]

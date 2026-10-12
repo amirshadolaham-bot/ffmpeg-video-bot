@@ -539,7 +539,8 @@ async def set_wm_pos_callback(client: Client, query: CallbackQuery):
     user_data[user_id]['watermark_settings']['position'] = pos
     await query.answer(f"Position set to: {pos}")
     
-    # Return to watermark menu
+    # Return to watermark menu (watermark_callback reads query.data as watermark_<user_id>)
+    query.data = f"watermark_{user_id}"
     await watermark_callback(client, query)
 
 
